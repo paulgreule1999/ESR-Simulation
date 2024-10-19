@@ -133,6 +133,7 @@ class SpinSys:
     ## Spin Hamiltonian Functions ##
     def calcEigEnergies(self):
         # This function builds the Spin Hamiltonian and then solves it 
+        self.H = np.zeros((self.dimensionOfMatrix,self.dimensionOfMatrix),dtype=complex) #Important to reset the spin Hamiltonian
         self.H_addZeeman()
         self.H_addTipField()
         self.H_addZeroField()
@@ -198,7 +199,6 @@ class SpinSys:
             for j_spin in range(self.NSpins):
                 if i_spin > j_spin:
                     if self.DipoleBool[index_counter]:
-                        print("Test")
                      # Calculate the distance between atoms i_spin and j_spin
                         distance_temp = np.linalg.norm(
                             (self.AtomPositions[i_spin, :] - self.AtomPositions[j_spin, :]) * self.latticeLengthXY * 1e-9
@@ -362,7 +362,7 @@ class SpinSys:
          'norm': 1
         }
 
-     #  Update with user-provided options
+         #  Update with user-provided options
         options.update(kwargs)
 
         # Initialize
@@ -398,7 +398,7 @@ class SpinSys:
                 print(f"Found {len(self.RecordedTransitions)} potential transitions:")
                 for i in range(len(self.RecordedTransitions)):
                     print(f"|{self.RecordedTransitions[i][0]}> -> |{self.RecordedTransitions[i][1]}>; "
-                        f"f = {self.ResonanceFrequencies[i]} GHz")
+                        f"f = {np.round(self.ResonanceFrequencies[i],4)} GHz")
             else:
                 print(f"There were {len(self.RecordedTransitions)} potential transitions in the specified frequency range")
 
@@ -440,7 +440,7 @@ class SpinSys:
                 index = np.argmin(np.abs(freq - freq_res))
                 amp = ESRsignal[index]
                 transition_str = (f"|{self.RecordedTransitions[i][0]}> -> |{self.RecordedTransitions[i][1]}>; "
-                                  f"f = {freq_res} GHz")
+                                  f"f = {np.round(freq_res,4)} GHz")
                 plt.plot(freq_res, amp, color=color_list[i], marker='.', markersize=12, 
                         label=transition_str, linewidth=2)
 
@@ -452,3 +452,48 @@ class SpinSys:
             plt.show()
 
         return freq, ESRsignal, self.p0
+    
+    def plotESRTipfieldsweep(self,**kwargs):
+        # Function that plots various ESR Spectra for different Tipfields
+
+        # Default options (like ops struct in MATLAB)
+        options = {
+         'FreqRange': [10, 20],
+         'BTipLimits': [-0.05,0.05],
+         'AllowPumping': 0,
+         'N_B': 20,
+         'N_Freq': 200,
+         'lw': 0.02,
+         'plot': 1,
+         'norm': 1
+        }
+
+         #  Update with user-provided options
+        options.update(kwargs)
+
+         # Predefine Arrays
+        BTipRange=np.linspace(options['BTipLimits'][0],options['BTipLimits'][1],options['N_B'])
+        Freq = np.zeros((options['N_Freq']), dtype=float)
+        ESRsignal = np.zeros((options['N_B'],options['N_Freq']), dtype=float)
+        
+        # calculating the ESR signal for each Field 
+        for i in range(options['N_B']):
+            self.BTip[2]=float(BTipRange[i])
+            self.calcEigEnergies()
+            Freq, ESRsignal[i][:],_ = self.calcESR_Benjamin(plot=0,norm=options['norm'],N=options['N_Freq'],lw=options['lw'],FreqRange=options['FreqRange'],AllowPumping=options['AllowPumping'])
+            
+        # Calculating the 
+        Detuning=1
+
+        # Plot the ESR Signal as a color plot
+        plt.figure()
+        plt.imshow(ESRsignal, cmap='PuBu', interpolation='none', extent=[Freq[0], Freq[-1], BTipRange[0], BTipRange[-1]], origin='lower', aspect='auto')
+        plt.colorbar()
+        plt.xlabel('Freq (GHz)')
+        plt.ylabel('B_Tip (T)')
+        plt.title('Tipfield dependent ESR')
+        plt.show() 
+
+                
+        
+            
