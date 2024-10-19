@@ -145,6 +145,7 @@ class SpinSys:
         E_sort = np.sort(E)
         Eindex = np.argsort(E)
         self.E_All = E_sort- E_sort[0]
+        self.E_All_inGHz = self.E_All*self.meVtoGHzConversion
         self.eigVectors = Evec[Eindex]
 
         self.calcEigStates()
@@ -323,3 +324,131 @@ class SpinSys:
 
         # Set color limits
         plt.clim(0, 1) 
+    
+    def calcRecordedTransitions(self,MinE,MaxE):
+    
+     # This function calculates the recorded transitions based on the occupation probability
+     # and the energy differences between states. It records transitions where the state
+     # has sufficiently high occupation and the energy difference is within the specified range.
+
+     # Initialize RecordedTransitions with a dummy value to avoid issues when appending later
+        RecordedTransitions = [(0, 0)]
+
+     # Loop over all possible state pairs
+        for i in range(self.dimensionOfMatrix):
+        # Check if the state has sufficiently high occupation based on the Boltzmann distribution
+            if self.p0[i] > 10**(-5):
+             for j in range(i + 1, self.dimensionOfMatrix):
+                # Calculate the energy difference
+                deltaE = self.E_All_inGHz[j] - self.E_All_inGHz[i]
+                if MinE < deltaE < MaxE:
+                    RecordedTransitions.append((i, j))
+                
+                    
+
+        # Remove the initial dummy (0, 0) element
+        RecordedTransitions.pop(0)
+
+        return RecordedTransitions 
+    
+    def calcESR_Benjamin(self,**kwargs):
+        # Default options (like ops struct in MATLAB)
+        options = {
+         'FreqRange': [10, 20],
+         'AllowPumping': 0,
+         'N': 5000,
+         'lw': 0.02,
+         'plot': 1,
+         'norm': 1
+        }
+
+     #  Update with user-provided options
+        options.update(kwargs)
+
+        # Initialize
+        self.ESRshift = 0
+        freq = np.linspace(options['FreqRange'][0], options['FreqRange'][1], options['N'])  # Frequency array
+        norm = options['norm']  # Normalization option
+
+        # Lorentzian function equivalent
+        fitlorentz = lambda para, x1: (1 / (para[3]**2 + 1) * abs(para[1]) * 
+                                        (1 + (x1 - para[0]) / (0.5 * para[2]) * para[3])**2 / 
+                                        (1 + ((x1 - para[0]) / (0.5 * para[2]))**2))
+
+        ESRsignal = np.zeros(len(freq))
+
+        # Get the populations
+
+        
+
+        # Look at transitions
+        p0 = np.exp((-self.E_All)/(self.kB*self.T)) # Both E and kb in meV bzw. meV/T
+        pTot = sum(p0)
+        self.p0 = p0/pTot
+        self.RecordedTransitions = self.calcRecordedTransitions(freq[0],freq[-1])
+        self.ResonanceFrequencies = np.zeros(len(self.RecordedTransitions))
+
+        for i in range(len(self.RecordedTransitions)):
+            self.ResonanceFrequencies[i] = abs(self.E_All_inGHz[self.RecordedTransitions[i][1]] - 
+                                            self.E_All_inGHz[self.RecordedTransitions[i][0]])
+
+        # Optionally print the transitions
+        if options['plot']:
+            if len(self.RecordedTransitions) < 300:
+                print(f"Found {len(self.RecordedTransitions)} potential transitions:")
+                for i in range(len(self.RecordedTransitions)):
+                    print(f"|{self.RecordedTransitions[i][0]}> -> |{self.RecordedTransitions[i][1]}>; "
+                        f"f = {self.ResonanceFrequencies[i]} GHz")
+            else:
+                print(f"There were {len(self.RecordedTransitions)} potential transitions in the specified frequency range")
+
+        # Amplitude calculation
+        for k in range(len(self.ResonanceFrequencies)):
+            i = self.RecordedTransitions[k][0]  # Initial state index
+            j = self.RecordedTransitions[k][1]  # Final state index
+
+            self.dp = abs(self.p0[i] - self.p0[j])
+
+            # Rabi rate factor
+            rabiRateFactor = 1
+
+            self.M_x = rabiRateFactor * (self.eigVectors[:, j].T.conj() @ self.Sx[self.ReadoutSpin,:, :] @ self.eigVectors[:, i])
+            self.M_y = rabiRateFactor * (self.eigVectors[:, j].T.conj() @ self.Sy[self.ReadoutSpin,:, :] @ self.eigVectors[:, i])
+            self.M_z = rabiRateFactor * (self.eigVectors[:, j].T.conj() @ self.Sz[self.ReadoutSpin,:, :] @ self.eigVectors[:, i])
+
+            self.Amp = self.dp * (self.BTip[0] * self.M_x + self.BTip[1] * self.M_y + self.BTip[2] * self.M_z)**2
+
+            fitlorentz = lambda para, x1: (1 / (para[3]**2 + 1) * abs(para[1]) *
+                               (1 + (x1 - para[0]) / (0.5 * para[2]) * para[3])**2 /
+                               (1 + ((x1 - para[0]) / (0.5 * para[2]))**2))
+
+            ESRsignal += fitlorentz([self.ResonanceFrequencies[k], self.Amp, options['lw'], 0], freq)
+
+        # Normalization
+        if norm == 1:
+            ESRsignal = (ESRsignal - ESRsignal.min()) / (ESRsignal.max() - ESRsignal.min())
+
+        # Plot the ESR signal if requested
+        if options['plot']:
+            color_list = plt.cm.hsv(np.linspace(0, 1, len(self.ResonanceFrequencies)))
+
+            plt.figure(1225)
+            plt.plot(freq, ESRsignal, '-k', linewidth=2, label='ESR Signal')
+
+            # Mark resonances
+            for i, freq_res in enumerate(self.ResonanceFrequencies):
+                index = np.argmin(np.abs(freq - freq_res))
+                amp = ESRsignal[index]
+                transition_str = (f"|{self.RecordedTransitions[i][0]}> -> |{self.RecordedTransitions[i][1]}>; "
+                                  f"f = {freq_res} GHz")
+                plt.plot(freq_res, amp, color=color_list[i], marker='.', markersize=12, 
+                        label=transition_str, linewidth=2)
+
+            plt.xlabel('Freq (GHz)')
+            plt.ylabel('ΔI (a.u.)')
+            plt.title('ESR-Simulation')
+            plt.legend()
+            plt.xlim([freq[0],freq[-1]])
+            plt.show()
+
+        return freq, ESRsignal, self.p0
