@@ -746,8 +746,6 @@ class SpinSys:
             self.I = self.I / (self.e**2 * self.T02 / self.h_meV)
         if options['Approach'] == "Loth":
             self.I += self.b0 * self.G * self.V_DC
-                
-    import numpy as np
 
     def calculate_derivative(self, I, V):
         
