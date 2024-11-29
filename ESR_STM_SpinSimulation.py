@@ -175,9 +175,9 @@ class SpinSys:
 
         # Solving the Hamiltonian and Sorting its Result 
         E, Evec = np.linalg.eigh(self.H)
-        E_sort = np.sort(E)
+        self.E_sort = np.sort(E)
         Eindex = np.argsort(E)
-        self.E_All = E_sort- E_sort[0]
+        self.E_All = self.E_sort- self.E_sort[0]
         self.E_All_inGHz = self.E_All*self.meVtoGHzConversion
         self.eigVectors = Evec[Eindex]
 
@@ -356,6 +356,26 @@ class SpinSys:
 
         # Set color limits
         plt.clim(0, 1) 
+    
+    def plotZeemanDiagramm(self,Bmin,Bmax,N):
+        # Function that plots the Zeeman Diagramm for a given Magnetic Field Range and Number of Points
+        
+        B = np.linspace(Bmin,Bmax,N)
+        E = np.zeros((N,self.dimensionOfMatrix))
+        
+        for i in range(N):
+            self.B = [0,0,B[i]]
+            self.calcEigEnergies()
+            E[i,:] = self.E_sort
+            
+        fig, ax = plt.subplots()
+        for i in range(self.dimensionOfMatrix):
+            ax.plot(B,E[:,i]*self.meVtoGHzConversion,label=f"E_{i}")
+        ax.set_xlabel('Magnetic Field (T)')
+        ax.set_ylabel('Energy (GHz)')
+        ax.set_title('Zeeman Diagramm')
+        ax.legend()
+        plt.show()
     
     def calcRecordedTransitions(self,MinE,MaxE):
     
@@ -865,4 +885,4 @@ class SpinSys:
 
         return V_array, dIdV, P
 
-            
+    

@@ -10,6 +10,7 @@
 
 ## Ideas
 - [ ] Improve performance
+- [ ] Make Subclasses
 - [ ] Make it more save by checking for inputs
 - [ ] Make it smart that it knows what it has to calculate next, State Management, Parameter file to quickly load parameters, Logging,
 
