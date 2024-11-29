@@ -1,7 +1,7 @@
 # TODO List
 
 ## Next
-- [ ] Fix the labeling and amplitude sign of the eigenvectors --> follow the typical convention 
+- [x] Fix the labeling and amplitude sign of the eigenvectors --> follow the typical convention 
 - [ ] Test the code for various systems
 - [ ] Add examples like two spin 1/2 for ESR or Fe for IETS 
 - [x] Add print parameters function 
