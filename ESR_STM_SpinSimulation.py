@@ -101,10 +101,12 @@ class SpinSys:
 
     ## Spin-Operator Calculations ##    
     def calcSpinOperators(self):
+        self.Sx = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)
+        self.Sy = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)
+        self.Sz = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)
 
-        self.Sx = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix),dtype=complex)
-        self.Sy = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix),dtype=complex)
-        self.Sz = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix),dtype=complex)
+        # Precompute identity matrices for Kronecker products
+        identity_matrices = [np.eye(int(2 * spin + 1)) for spin in self.Spins]
 
         # Loop through each spin
         for i_spin in range(self.NSpins):
@@ -112,33 +114,26 @@ class SpinSys:
             sigma_x, sigma_y, sigma_z = self.calcAngMomMatrices(self.Spins[i_spin])
 
             # Initialize temporary variables for spin operators
-            SxTemp = 1
-            SyTemp = 1
-            SzTemp = 1
+            SxTemp = sigma_x
+            SyTemp = sigma_y
+            SzTemp = sigma_z
 
             # Apply Kronecker product for previous spins
             for j in range(i_spin):
-                unit = np.eye(len(np.arange(-self.Spins[j],self.Spins[j]+1)))
-                SxTemp = np.kron(unit, SxTemp)
-                SyTemp = np.kron(unit, SyTemp)
-                SzTemp = np.kron(unit, SzTemp)
-
-            # Multiply with current spin angular momentum matrices
-            SxTemp = np.kron(SxTemp, sigma_x)
-            SyTemp = np.kron(SyTemp, sigma_y)
-            SzTemp = np.kron(SzTemp, sigma_z)
+                SxTemp = np.kron(identity_matrices[j], SxTemp)
+                SyTemp = np.kron(identity_matrices[j], SyTemp)
+                SzTemp = np.kron(identity_matrices[j], SzTemp)
 
             # Apply Kronecker product for following spins
             for j in range(i_spin + 1, self.NSpins):
-                unit = np.eye(len(np.arange(-self.Spins[j],self.Spins[j]+1)))
-                SxTemp = np.kron(SxTemp, unit)
-                SyTemp = np.kron(SyTemp, unit)
-                SzTemp = np.kron(SzTemp, unit)
+                SxTemp = np.kron(SxTemp, identity_matrices[j])
+                SyTemp = np.kron(SyTemp, identity_matrices[j])
+                SzTemp = np.kron(SzTemp, identity_matrices[j])
 
             # Store the calculated spin operators in the class attributes
-            self.Sx[i_spin,:,:]=SxTemp
-            self.Sy[i_spin,:,:]=SyTemp
-            self.Sz[i_spin,:,:]=SzTemp
+            self.Sx[i_spin, :, :] = SxTemp
+            self.Sy[i_spin, :, :] = SyTemp
+            self.Sz[i_spin, :, :] = SzTemp
             
     def calcAngMomMatrices(self, s):
         m_values = np.arange(-s, s + 1, 1)  # m = -s to +s
@@ -165,7 +160,7 @@ class SpinSys:
     ## Spin Hamiltonian Functions ## 
     def calcEigEnergies(self):
         # This function builds the Spin Hamiltonian and then solves it 
-        self.H = np.zeros((self.dimensionOfMatrix,self.dimensionOfMatrix),dtype=complex) #Important to reset the spin Hamiltonian
+        self.H = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)  # Important to reset the spin Hamiltonian
         self.H_addZeeman()
         self.H_addTipField()
         self.H_addZeroField()
@@ -177,9 +172,23 @@ class SpinSys:
         E, Evec = np.linalg.eigh(self.H)
         self.E_sort = np.sort(E)
         Eindex = np.argsort(E)
-        self.E_All = self.E_sort- self.E_sort[0]
-        self.E_All_inGHz = self.E_All*self.meVtoGHzConversion
-        self.eigVectors = Evec[Eindex]
+        self.E_All = self.E_sort - self.E_sort[0]
+        self.E_All_inGHz = self.E_All * self.meVtoGHzConversion
+        self.eigVectors = Evec[:, Eindex]
+
+
+        # Build the basis states in vector from the solutions of the Sz operator
+        Sz_Operator = np.sum(self.Sz, axis=0)
+        E_b,Evec_b = np.linalg.eigh(-Sz_Operator)
+        
+        # sort them via the eigenvalue
+        Eindex_b = np.argsort(E_b)
+        self.basisVectors = Evec_b[:, Eindex_b]
+
+        # Ensure the first component of the lowest energy eigenvector is positive
+       # for i in range(self.dimensionOfMatrix):
+       #     if np.real(self.eigVectors[0, i]) < 0:
+       #         self.eigVectors[:, i] = -self.eigVectors[:, i]
 
         self.calcEigStates()
 
@@ -324,18 +333,25 @@ class SpinSys:
     
     def showEigenMatrix(self, plot_type='p'):
         # Determine the matrix values based on plot_type
+
+        projection  = np.zeros([self.dimensionOfMatrix,self.dimensionOfMatrix],dtype=complex)
+        for i in range(self.dimensionOfMatrix):
+            for j in range(self.dimensionOfMatrix): 
+                projection[j,i] = np.dot(self.basisVectors[j].T.conj(), self.eigVectors[i, :])
+        
         if plot_type == 'p':
-            m = np.abs(self.eigVectors[:, ::-1])**2
+            m = abs(np.conjugate(projection) * projection)
             name0, colormap = 'Probability', 'hot'
         elif plot_type == 'a':
-            m = np.real(self.eigVectors[:, ::-1]) + np.imag(self.eigVectors[:, ::-1])
+            m = np.real(projection) + np.imag(projection)
             name0, colormap = 'Amplitude', 'coolwarm'
         else:
             raise ValueError("Invalid plot_type. Use 'p' for probability or 'a' for amplitude.")
 
+        
         # Generate the figure
         plt.figure(np.random.randint(30000, 40000))
-        plt.imshow(m, cmap=colormap, aspect='auto')
+        plt.imshow(np.flipud(m), cmap=colormap, aspect='auto') #We have to flip the projection matrix in order to have the first entry on the lower left corner
         c = plt.colorbar()
         plt.xlabel('Basis States')
         plt.ylabel('Eigenstates')
@@ -873,7 +889,8 @@ class SpinSys:
     def plotEnergyVsSz(self):
         # Calculate the Sz matrix elements for each state
         Sz_elements = np.zeros(self.dimensionOfMatrix)
-        Sz_Operator = sum(self.Sz)
+
+        Sz_Operator = np.sum(self.Sz, axis=0)
         for i in range(self.dimensionOfMatrix):
             Sz_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sz_Operator @ self.eigVectors[:, i])
 
