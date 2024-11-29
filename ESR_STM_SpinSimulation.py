@@ -322,40 +322,30 @@ class SpinSys:
         self.statesOnlyRHS = statesOnlyRHS
         self.basisStates = basisStates
     
-    def showEigenMatrix(self):
-        m = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix))
-
-        # Fill the matrix with probabilities
-        for i in range(self.dimensionOfMatrix):
-            for j in range(self.dimensionOfMatrix):
-                m[i, j] = np.abs(self.eigVectors[j, self.dimensionOfMatrix - 1 - i])**2
+    def showEigenMatrix(self, plot_type='p'):
+        # Determine the matrix values based on plot_type
+        if plot_type == 'p':
+            m = np.abs(self.eigVectors[:, ::-1])**2
+            name0, colormap = 'Probability', 'hot'
+        elif plot_type == 'a':
+            m = np.real(self.eigVectors[:, ::-1]) + np.imag(self.eigVectors[:, ::-1])
+            name0, colormap = 'Amplitude', 'coolwarm'
+        else:
+            raise ValueError("Invalid plot_type. Use 'p' for probability or 'a' for amplitude.")
 
         # Generate the figure
         plt.figure(np.random.randint(30000, 40000))
-        name0 = 'Probability'
-
-        # Display the matrix as an image (colormap)
-        plt.imshow(m, cmap='hot', aspect='auto')
+        plt.imshow(m, cmap=colormap, aspect='auto')
         c = plt.colorbar()
-
-        # Axis labels
         plt.xlabel('Basis States')
         plt.ylabel('Eigenstates')
-
-         # Title with external magnetic field values
         plt.title(f"System Eigenstates, B_Ext = [{self.B[0]}, {self.B[1]}, {self.B[2]}]")
-
-        # Set colorbar label
         c.set_label(name0)
-
-        # Set x-axis ticks and labels
         plt.xticks(np.arange(self.dimensionOfMatrix), self.basisStates)
-
-        # Set y-axis ticks and labels, flipping them
         plt.yticks(np.arange(self.dimensionOfMatrix), self.statesOnlyLHS[::-1])
 
         # Set color limits
-        plt.clim(0, 1) 
+        plt.clim(0, 1) if plot_type == 'p' else plt.clim(-1, 1)
     
     def plotZeemanDiagramm(self,Bmin,Bmax,N):
         # Function that plots the Zeeman Diagramm for a given Magnetic Field Range and Number of Points
@@ -662,44 +652,39 @@ class SpinSys:
          return x_st, y_st, z_st, u_st
      
     def calcRateIntegrals(self):
-     
-     # Create the three nxn matrices [I_ts, I_st, I_ss]
-     RateIntegrals = np.zeros((3,self.dimensionOfMatrix, self.dimensionOfMatrix))
+        # Create the three nxn matrices [I_ts, I_st, I_ss]
+        RateIntegrals = np.zeros((3, self.dimensionOfMatrix, self.dimensionOfMatrix))
 
-     # Define the Fermi-Dirac Distribution function
-     FermiDirac = lambda energy: 1 / (1 + np.exp(energy / (self.kB * self.T)))
+        # Define the Fermi-Dirac Distribution function with clipping
+        FermiDirac = lambda energy: 1 / (1 + np.exp(energy / (self.kB * self.T)))
+        #FermiDirac = lambda energy: 1 / (1 + np.exp(np.clip(energy / (self.kB * self.T), -100, 100)))
+       
+        # Calculating the integral
+        if self.V_DC == 0:
+            for i in range(self.dimensionOfMatrix):
+                for j in range(self.dimensionOfMatrix):
+                    fun_ts = lambda x: FermiDirac(x - self.V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
+                    fun_st = lambda x: FermiDirac(x + self.V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
+                    fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
 
-     # Calculating the integral
-     # If DC voltage is zero, use the integral
-     if self.V_DC == 0:
-        for i in range(self.dimensionOfMatrix):
-            for j in range(self.dimensionOfMatrix):
-                # Define the integrand functions
-                fun_ts = lambda x: FermiDirac(x - self.V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
-                fun_st = lambda x: FermiDirac(x + self.V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
-                fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
-
-                # Integrate over the range (-inf, inf)
-                RateIntegrals[0, i, j] = quad(fun_ts, -np.inf, np.inf)[0]
-                RateIntegrals[1, i, j] = quad(fun_st, -np.inf, np.inf)[0]
-                RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
-     else:
-        # Use the analytical solution if V_DC is non-zero
-        for i in range(self.dimensionOfMatrix):
-            for j in range(self.dimensionOfMatrix):
-                delta_E = self.E_All[j] - self.E_All[i]
-
-                RateIntegrals[0, i, j] = abs((delta_E - self.V_DC) / (np.exp((delta_E - self.V_DC) / (self.kB * self.T)) - 1))
-                RateIntegrals[1, i, j] = abs((delta_E + self.V_DC) / (np.exp((delta_E + self.V_DC) / (self.kB * self.T)) - 1))
-
-                # Exception for the sample-sample rate where delta_E = 0
-                if delta_E == 0.0:
-                    fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - delta_E))
+                    RateIntegrals[0, i, j] = quad(fun_ts, -np.inf, np.inf)[0]
+                    RateIntegrals[1, i, j] = quad(fun_st, -np.inf, np.inf)[0]
                     RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
-                else:
-                    RateIntegrals[2, i, j] = abs(delta_E / (np.exp(delta_E / (self.kB * self.T)) - 1))
+        else:
+            for i in range(self.dimensionOfMatrix):
+                for j in range(self.dimensionOfMatrix):
+                    delta_E = self.E_All[j] - self.E_All[i]
 
-     return RateIntegrals
+                    RateIntegrals[0, i, j] = abs((delta_E - self.V_DC) / (np.exp(np.clip((delta_E - self.V_DC) / (self.kB * self.T), -700, 700)) - 1))
+                    RateIntegrals[1, i, j] = abs((delta_E + self.V_DC) / (np.exp(np.clip((delta_E + self.V_DC) / (self.kB * self.T), -700, 700)) - 1))
+
+                    if delta_E == 0.0:
+                        fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - delta_E))
+                        RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
+                    else:
+                        RateIntegrals[2, i, j] = abs(delta_E / (np.exp(np.clip(delta_E / (self.kB * self.T), -700, 700)) - 1))
+
+        return RateIntegrals
         
     def calcRates(self, **kwargs):
 
@@ -884,5 +869,20 @@ class SpinSys:
             plt.show()
 
         return V_array, dIdV, P
-
     
+    def plotEnergyVsSz(self):
+        # Calculate the Sz matrix elements for each state
+        Sz_elements = np.zeros(self.dimensionOfMatrix)
+        Sz_Operator = sum(self.Sz)
+        for i in range(self.dimensionOfMatrix):
+            Sz_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sz_Operator @ self.eigVectors[:, i])
+
+        # Plot the energy vs Sz matrix elements
+        plt.figure()
+        plt.scatter(Sz_elements, self.E_All_inGHz, c='b', marker='o')
+        #plt.xlabel(r'$\langle \psi | S_z | \psi \rangle$')
+        plt.xlabel('m_z')
+        plt.ylabel('Energy (GHz)')
+        plt.title('Energy vs Sz Matrix Elements')
+        plt.grid(True)
+        plt.show()

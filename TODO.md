@@ -1,12 +1,14 @@
 # TODO List
 
 ## Next
+- [ ] Fix the labeling and amplitude sign of the eigenvectors --> follow the typical convention 
 - [ ] Test the code for various systems
 - [ ] Add examples like two spin 1/2 for ESR or Fe for IETS 
 - [x] Add print parameters function 
-- [ ] Fix: overflow encountered in exp
-- [ ] Structure the class better and add descriptions
+- [x] Fix: overflow encountered in exp --> somehow the fixing options makes it slower
+- [ ] Structure the class better and add descriptions --> via sub classes??
 - [x] Include the spin pumping in the ESR experiment
+- [x] Add showing Matrix representation 
 
 ## Ideas
 - [ ] Improve performance
