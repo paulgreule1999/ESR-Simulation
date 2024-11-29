@@ -58,8 +58,8 @@ class SpinSys:
         self.SamplePolarization = [0,0,0]
         self.U = np.zeros(self.NSpins) 
         self.b0 = 0 # Ratio how many electrons that tunnel do not care about the spin!!
-        self.G = 1e-6; # [A/V], Experimental conductance at 0V;
-        self.G_ss = [2e-6]*self.NSpins # Sample-Sample conductance
+        self.G = 1e-9; # [A/V], Experimental conductance at 0V;
+        self.G_ss = [1e-8]*self.NSpins # Sample-Sample conductance
         self.G_tt = 1 # 1 enables tip-tip scattering contribution, 0 disables it!
 
         self.T02 = 2e-5 
@@ -67,6 +67,37 @@ class SpinSys:
 
         # ESR Parameters
 
+    def print_parameters(self):
+        print("Spin System Parameters:")
+        print(f"Number of Spins: {self.NSpins}")
+        print(f"Dimension of Matrix: {self.dimensionOfMatrix}")
+        print(f"Readout Spin: {self.ReadoutSpin}")
+        print(f"Atom Positions: \n{self.AtomPositions}")
+        # print(f"Lattice Length XY: {self.latticeLengthXY}")
+        print(f"Temperature (T): {self.T} K")
+        print(f"External Magnetic Field (B): {self.B} T")
+        print(f"Tip Magnetic Field (BTip): {self.BTip} T")
+        print(f"Tip Field Gradient (BTipGradient): {self.BTipGradient} T")
+        print(f"Tip Type: {self.tip}")
+        print(f"g-factor Vector: {self.gfactorvector}")
+        print(f"Out of Plane Anisotropy (Dvector): {self.Dvector} meV")
+        print(f"In Plane Anisotropy (Evector): {self.Evector} meV")
+        print(f"Dipole Interaction Matrix (D0): \n{self.D0*self.meVtoGHzConversion} GHz")
+        print(f"Dipole Interaction Bool Array (DipoleBool): {self.DipoleBool}")
+        print(f"Exchange Interaction Vector (Jvector): \n{self.Jvector} meV")
+        print(f"Exchange Interaction Vector (Jvector): \n{self.Jvector*self.meVtoGHzConversion} GHz")
+        print()
+        print("Tunneling Parameters:")
+        print(f"DC Voltage (V_DC): {self.V_DC} mV")
+        print(f"Tip Polarization: {self.TipPolarization}")
+        print(f"Sample Polarization: {self.SamplePolarization}")
+        print(f"U: {self.U}")
+        print(f"b0: {self.b0}")
+        print(f"Conductance (G): {self.G} A/V")
+        print(f"Sample-Sample Conductance (G_ss): {self.G_ss} A/V")
+        print(f"Tip-Tip Scattering Contribution (G_tt): {self.G_tt}")
+        # print(f"T02: {self.T02}")
+        # print(f"Jrs: {self.Jrs}")
 
     ## Spin-Operator Calculations ##    
     def calcSpinOperators(self):
@@ -109,7 +140,6 @@ class SpinSys:
             self.Sy[i_spin,:,:]=SyTemp
             self.Sz[i_spin,:,:]=SzTemp
             
-
     def calcAngMomMatrices(self, s):
         m_values = np.arange(-s, s + 1, 1)  # m = -s to +s
 
@@ -132,7 +162,7 @@ class SpinSys:
 
         return S_x, S_y, S_z
     
-    ## Spin Hamiltonian Functions ##
+    ## Spin Hamiltonian Functions ## 
     def calcEigEnergies(self):
         # This function builds the Spin Hamiltonian and then solves it 
         self.H = np.zeros((self.dimensionOfMatrix,self.dimensionOfMatrix),dtype=complex) #Important to reset the spin Hamiltonian
@@ -339,7 +369,7 @@ class SpinSys:
      # Loop over all possible state pairs
         for i in range(self.dimensionOfMatrix):
         # Check if the state has sufficiently high occupation based on the Boltzmann distribution
-            if self.p0[i] > 10**(-5):
+            if self.Populations[i] > 10**(-5):
              for j in range(i + 1, self.dimensionOfMatrix):
                 # Calculate the energy difference
                 deltaE = self.E_All_inGHz[j] - self.E_All_inGHz[i]
@@ -358,7 +388,7 @@ class SpinSys:
         options = {
          'FreqRange': [10, 20],
          'AllowPumping': 0,
-         'N': 5000,
+         'N': 1000,
          'lw': 0.02,
          'plot': 1,
          'norm': 1
@@ -380,13 +410,16 @@ class SpinSys:
         ESRsignal = np.zeros(len(freq))
 
         # Get the populations
-
-        
-
-        # Look at transitions
         p0 = np.exp((-self.E_All)/(self.kB*self.T)) # Both E and kb in meV bzw. meV/T
         pTot = sum(p0)
         self.p0 = p0/pTot
+
+        if options['AllowPumping']:
+            self.calcRates(AllowPumping=1)
+        else:       
+            self.Populations = self.p0
+
+        # Look at transitions
         self.RecordedTransitions = self.calcRecordedTransitions(freq[0],freq[-1])
         self.ResonanceFrequencies = np.zeros(len(self.RecordedTransitions))
 
@@ -409,7 +442,7 @@ class SpinSys:
             i = self.RecordedTransitions[k][0]  # Initial state index
             j = self.RecordedTransitions[k][1]  # Final state index
 
-            self.dp = abs(self.p0[i] - self.p0[j])
+            self.dp = abs(self.Populations[i] - self.Populations[j])
 
             # Rabi rate factor
             rabiRateFactor = 1
@@ -453,6 +486,8 @@ class SpinSys:
             plt.xlim([freq[0],freq[-1]])
             plt.show()
 
+        
+
         return freq, ESRsignal, self.p0
     
     def plotESRTipfieldsweep(self,**kwargs):
@@ -485,34 +520,35 @@ class SpinSys:
             Freq, ESRsignal[i][:],_ = self.calcESR_Benjamin(plot=0,norm=options['norm'],N=options['N_Freq'],lw=options['lw'],FreqRange=options['FreqRange'],AllowPumping=options['AllowPumping'])
             
         # Calculating the Detuning from the Tipfield
-        Detuning=self.g*self.muB*BTipRange*self.meVtoGHzConversion
+       
+        Detuning=self.gfactorvector[self.ReadoutSpin] * self.muB * (BTipRange + self.B[2]) * self.meVtoGHzConversion - self.g * self.muB * self.B[2] * self.meVtoGHzConversion
 
         # Plot the ESR Signal as a color plot
         fig, ax1 = plt.subplots()
 
         # Plot the matrix using imshow
         im = ax1.imshow(ESRsignal, cmap='Blues', interpolation='none', 
-                        extent=[Freq[0], Freq[-1], BTipRange[0], BTipRange[-1]], origin='lower', aspect='auto')
+                        extent=[Freq[0], Freq[-1], BTipRange[0]*1e3, BTipRange[-1]*1e3], origin='lower', aspect='auto')
 
         # Add labels and title for primary Y-axis
         ax1.set_xlabel('Freq (GHz)')
-        ax1.set_ylabel('B_Tip (T)')
+        ax1.set_ylabel('B_Tip (mT)')
         ax1.set_title('Tipfield dependent ESR')
 
         # Create a secondary Y-axis
         ax2 = ax1.twinx()
         ax2.set_ylim(BTipRange[0], BTipRange[-1])
         y_ticks = ax1.get_yticks()
-        detuning_labels = np.interp(y_ticks, BTipRange, Detuning)
+        detuning_labels = np.interp(y_ticks / 1e3, BTipRange, Detuning)
         ax2.set_yticks(y_ticks)
         ax2.set_yticklabels(np.round(detuning_labels, 2))
         ax2.set_ylabel('Detuning (GHz)')
 
         cbar = plt.colorbar(im, ax=ax1)
         cbar.ax.set_position([0.9, 0.1, 0.03, 0.8])
-
+        
         plt.show()
-
+        
     def calcTunnelingMatrixElements(self,scattertype):
 
      
@@ -828,6 +864,5 @@ class SpinSys:
             plt.show()
 
         return V_array, dIdV, P
-
 
             
