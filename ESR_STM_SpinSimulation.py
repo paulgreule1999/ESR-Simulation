@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import quad
 from scipy.linalg import null_space
+from functools import lru_cache 
 
 class SpinSys:
 
@@ -60,7 +61,7 @@ class SpinSys:
         self.b0 = 0 # Ratio how many electrons that tunnel do not care about the spin!!
         self.G = 1e-9; # [A/V], Experimental conductance at 0V;
         self.G_ss = [1e-8]*self.NSpins # Sample-Sample conductance
-        self.G_tt = 1 # 1 enables tip-tip scattering contribution, 0 disables it!
+        self.G_tt = 0 # 1 enables tip-tip scattering contribution, 0 disables it!
 
         self.T02 = 2e-5 
         self.Jrs = 0.1 
@@ -101,10 +102,12 @@ class SpinSys:
 
     ## Spin-Operator Calculations ##    
     def calcSpinOperators(self):
+        self.Sx = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)
+        self.Sy = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)
+        self.Sz = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)
 
-        self.Sx = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix),dtype=complex)
-        self.Sy = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix),dtype=complex)
-        self.Sz = np.zeros((self.NSpins, self.dimensionOfMatrix, self.dimensionOfMatrix),dtype=complex)
+        # Precompute identity matrices for Kronecker products
+        identity_matrices = [np.eye(int(2 * spin + 1)) for spin in self.Spins]
 
         # Loop through each spin
         for i_spin in range(self.NSpins):
@@ -112,33 +115,26 @@ class SpinSys:
             sigma_x, sigma_y, sigma_z = self.calcAngMomMatrices(self.Spins[i_spin])
 
             # Initialize temporary variables for spin operators
-            SxTemp = 1
-            SyTemp = 1
-            SzTemp = 1
+            SxTemp = sigma_x
+            SyTemp = sigma_y
+            SzTemp = sigma_z
 
             # Apply Kronecker product for previous spins
             for j in range(i_spin):
-                unit = np.eye(len(np.arange(-self.Spins[j],self.Spins[j]+1)))
-                SxTemp = np.kron(unit, SxTemp)
-                SyTemp = np.kron(unit, SyTemp)
-                SzTemp = np.kron(unit, SzTemp)
-
-            # Multiply with current spin angular momentum matrices
-            SxTemp = np.kron(SxTemp, sigma_x)
-            SyTemp = np.kron(SyTemp, sigma_y)
-            SzTemp = np.kron(SzTemp, sigma_z)
+                SxTemp = np.kron(identity_matrices[j], SxTemp)
+                SyTemp = np.kron(identity_matrices[j], SyTemp)
+                SzTemp = np.kron(identity_matrices[j], SzTemp)
 
             # Apply Kronecker product for following spins
             for j in range(i_spin + 1, self.NSpins):
-                unit = np.eye(len(np.arange(-self.Spins[j],self.Spins[j]+1)))
-                SxTemp = np.kron(SxTemp, unit)
-                SyTemp = np.kron(SyTemp, unit)
-                SzTemp = np.kron(SzTemp, unit)
+                SxTemp = np.kron(SxTemp, identity_matrices[j])
+                SyTemp = np.kron(SyTemp, identity_matrices[j])
+                SzTemp = np.kron(SzTemp, identity_matrices[j])
 
             # Store the calculated spin operators in the class attributes
-            self.Sx[i_spin,:,:]=SxTemp
-            self.Sy[i_spin,:,:]=SyTemp
-            self.Sz[i_spin,:,:]=SzTemp
+            self.Sx[i_spin, :, :] = SxTemp
+            self.Sy[i_spin, :, :] = SyTemp
+            self.Sz[i_spin, :, :] = SzTemp
             
     def calcAngMomMatrices(self, s):
         m_values = np.arange(-s, s + 1, 1)  # m = -s to +s
@@ -165,7 +161,7 @@ class SpinSys:
     ## Spin Hamiltonian Functions ## 
     def calcEigEnergies(self):
         # This function builds the Spin Hamiltonian and then solves it 
-        self.H = np.zeros((self.dimensionOfMatrix,self.dimensionOfMatrix),dtype=complex) #Important to reset the spin Hamiltonian
+        self.H = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix), dtype=complex)  # Important to reset the spin Hamiltonian
         self.H_addZeeman()
         self.H_addTipField()
         self.H_addZeroField()
@@ -177,11 +173,25 @@ class SpinSys:
         E, Evec = np.linalg.eigh(self.H)
         self.E_sort = np.sort(E)
         Eindex = np.argsort(E)
-        self.E_All = self.E_sort- self.E_sort[0]
-        self.E_All_inGHz = self.E_All*self.meVtoGHzConversion
-        self.eigVectors = Evec[Eindex]
+        self.E_All = self.E_sort - self.E_sort[0]
+        self.E_All_inGHz = self.E_All * self.meVtoGHzConversion
+        self.eigVectors = Evec[:, Eindex]
 
-        self.calcEigStates()
+
+        # Build the basis states in vector from the solutions of the Sz operator
+        Sz_Operator = np.sum(self.Sz, axis=0)
+        E_b,Evec_b = np.linalg.eigh(-Sz_Operator)
+        
+        # sort them via the eigenvalue
+        #Eindex_b = np.argsort(E_b)
+        #self.basisVectors = Evec_b[:, Eindex_b]
+
+        # Ensure the first component of the lowest energy eigenvector is positive
+       # for i in range(self.dimensionOfMatrix):
+       #     if np.real(self.eigVectors[0, i]) < 0:
+       #         self.eigVectors[:, i] = -self.eigVectors[:, i]
+
+        #self.calcEigStates()
 
     def H_addZeeman(self):
         # Adding the Zeeman Term 
@@ -322,51 +332,62 @@ class SpinSys:
         self.statesOnlyRHS = statesOnlyRHS
         self.basisStates = basisStates
     
-    def showEigenMatrix(self):
-        m = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix))
-
-        # Fill the matrix with probabilities
+    def showEigenMatrix(self, plot_type='p'):
+               
+        projection = np.zeros([self.dimensionOfMatrix,self.dimensionOfMatrix],dtype=complex)
         for i in range(self.dimensionOfMatrix):
             for j in range(self.dimensionOfMatrix):
-                m[i, j] = np.abs(self.eigVectors[j, self.dimensionOfMatrix - 1 - i])**2
+                projection[i, j] = np.dot(self.eigVectors[:, i].conj().T, np.identity(self.dimensionOfMatrix)[:, j])
 
+
+        if plot_type == 'p':
+            m = abs(np.conjugate(projection) * projection)
+            name0, colormap = 'Probability', 'hot'
+        elif plot_type == 'a':
+            m = np.real(projection) + np.imag(projection)
+            name0, colormap = 'Amplitude', 'coolwarm'
+        else:
+            raise ValueError("Invalid plot_type. Use 'p' for probability or 'a' for amplitude.")
+
+        
         # Generate the figure
-        plt.figure(np.random.randint(30000, 40000))
-        name0 = 'Probability'
-
-        # Display the matrix as an image (colormap)
-        plt.imshow(m, cmap='hot', aspect='auto')
+        plt.figure(110)
+        plt.imshow(np.flipud(m), cmap=colormap, aspect='auto') #We have to flip the projection matrix in order to have the first entry on the lower left corner
         c = plt.colorbar()
-
-        # Axis labels
         plt.xlabel('Basis States')
         plt.ylabel('Eigenstates')
-
-         # Title with external magnetic field values
         plt.title(f"System Eigenstates, B_Ext = [{self.B[0]}, {self.B[1]}, {self.B[2]}]")
-
-        # Set colorbar label
         c.set_label(name0)
-
-        # Set x-axis ticks and labels
         plt.xticks(np.arange(self.dimensionOfMatrix), self.basisStates)
-
-        # Set y-axis ticks and labels, flipping them
         plt.yticks(np.arange(self.dimensionOfMatrix), self.statesOnlyLHS[::-1])
 
         # Set color limits
-        plt.clim(0, 1) 
+        plt.clim(0, 1) if plot_type == 'p' else plt.clim(-1, 1)
     
-    def plotZeemanDiagramm(self,Bmin,Bmax,N):
+    def plotZeemanDiagramm(self,**kwargs):
         # Function that plots the Zeeman Diagramm for a given Magnetic Field Range and Number of Points
+        # Default options (like ops struct in MATLAB)
+        options = {
+         'Brange': [0,1],
+         'N': 200,
+        }
+
+         #  Update with user-provided options
+        options.update(kwargs)
+
+        # Save the initial B-Vector
+        Binitial = self.B
+        B = np.linspace(options['Brange'][0],options['Brange'][1],options['N'])
+        E = np.zeros((options['N'],self.dimensionOfMatrix))
         
-        B = np.linspace(Bmin,Bmax,N)
-        E = np.zeros((N,self.dimensionOfMatrix))
-        
-        for i in range(N):
+        for i in range(options['N']):
             self.B = [0,0,B[i]]
             self.calcEigEnergies()
             E[i,:] = self.E_sort
+
+        # Resotre the initial solution
+        self.B = Binitial
+        self.calcEigEnergies()
             
         fig, ax = plt.subplots()
         for i in range(self.dimensionOfMatrix):
@@ -518,9 +539,9 @@ class SpinSys:
          'FreqRange': [10, 20],
          'BTipLimits': [-0.05,0.05],
          'AllowPumping': 0,
-         'N_B': 20,
-         'N_Freq': 200,
-         'lw': 0.02,
+         'N_B': 500,
+         'N_Freq': 500,
+         'lw': 0.1,
          'plot': 1,
          'norm': 1
         }
@@ -529,13 +550,14 @@ class SpinSys:
         options.update(kwargs)
 
          # Predefine Arrays
-        BTipRange=np.linspace(options['BTipLimits'][0],options['BTipLimits'][1],options['N_B'])
+        BTipRange=np.linspace(options['BTipLimits'][0],options['BTipLimits'][1],options['N_B'],dtype=float)
+        #print(BTipRange)
         Freq = np.zeros((options['N_Freq']), dtype=float)
         ESRsignal = np.zeros((options['N_B'],options['N_Freq']), dtype=float)
         
         # calculating the ESR signal for each Field 
         for i in range(options['N_B']):
-            self.BTip[2]=float(BTipRange[i])
+            self.BTip[2]=BTipRange[i]
             self.calcEigEnergies()
             Freq, ESRsignal[i][:],_ = self.calcESR_Benjamin(plot=0,norm=options['norm'],N=options['N_Freq'],lw=options['lw'],FreqRange=options['FreqRange'],AllowPumping=options['AllowPumping'])
             
@@ -546,7 +568,7 @@ class SpinSys:
         # Plot the ESR Signal as a color plot
         fig, ax1 = plt.subplots()
 
-        # Plot the matrix using imshow
+        #Plot the matrix using imshow
         im = ax1.imshow(ESRsignal, cmap='Blues', interpolation='none', 
                         extent=[Freq[0], Freq[-1], BTipRange[0]*1e3, BTipRange[-1]*1e3], origin='lower', aspect='auto')
 
@@ -570,9 +592,6 @@ class SpinSys:
         plt.show()
         
     def calcTunnelingMatrixElements(self,scattertype):
-
-     
-
      # Get the electron tunneling matrix elements
      # scattertype = "st", "tt", "ss"
      x_el, y_el, z_el, u_el = self.calcTunnelingElectronMatrixElements(scattertype)
@@ -661,45 +680,50 @@ class SpinSys:
      else:
          return x_st, y_st, z_st, u_st
      
-    def calcRateIntegrals(self):
-     
-     # Create the three nxn matrices [I_ts, I_st, I_ss]
-     RateIntegrals = np.zeros((3,self.dimensionOfMatrix, self.dimensionOfMatrix))
+    def calcRateIntegrals(self,V_DC,type):
+        # Create the three nxn matrices [I_ts, I_st, I_ss]
+        RateIntegrals = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix))
 
-     # Define the Fermi-Dirac Distribution function
-     FermiDirac = lambda energy: 1 / (1 + np.exp(energy / (self.kB * self.T)))
+        # Define the Fermi-Dirac Distribution function with clipping
+        #FermiDirac = lambda energy: 1 / (1 + np.exp(energy / (self.kB * self.T)))
+        #FermiDirac = lambda energy: 1 / (1 + np.exp(np.clip(energy / (self.kB * self.T), -100, 100)))
+       
+        # Calculating the integral
+        """
+        if V_DC == 0:
+            for i in range(self.dimensionOfMatrix):
+                for j in range(self.dimensionOfMatrix):
+                    fun_ts = lambda x: FermiDirac(x - V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
+                    fun_st = lambda x: FermiDirac(x + V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
+                    fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
 
-     # Calculating the integral
-     # If DC voltage is zero, use the integral
-     if self.V_DC == 0:
-        for i in range(self.dimensionOfMatrix):
-            for j in range(self.dimensionOfMatrix):
-                # Define the integrand functions
-                fun_ts = lambda x: FermiDirac(x - self.V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
-                fun_st = lambda x: FermiDirac(x + self.V_DC) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
-                fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - (self.E_All[j] - self.E_All[i])))
+                    RateIntegrals[0, i, j] = quad(fun_ts, -np.inf, np.inf)[0]
+                    RateIntegrals[1, i, j] = quad(fun_st, -np.inf, np.inf)[0]
+                    RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
+                    """
+        if V_DC == 0:
+            V_DC = 1e-9
 
-                # Integrate over the range (-inf, inf)
-                RateIntegrals[0, i, j] = quad(fun_ts, -np.inf, np.inf)[0]
-                RateIntegrals[1, i, j] = quad(fun_st, -np.inf, np.inf)[0]
-                RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
-     else:
-        # Use the analytical solution if V_DC is non-zero
+        #else:
         for i in range(self.dimensionOfMatrix):
             for j in range(self.dimensionOfMatrix):
                 delta_E = self.E_All[j] - self.E_All[i]
+                if type=='ts':
+                    RateIntegrals[i, j] = abs((delta_E - V_DC) / (np.exp((delta_E - V_DC) / (self.kB * self.T)) - 1))
+                elif type == 'st':
+                    RateIntegrals[i, j] = abs((delta_E + V_DC) / (np.exp((delta_E + V_DC) / (self.kB * self.T)) - 1))
+                elif type == 'ss':
+                    RateIntegrals[i, j] = abs(delta_E / (np.exp(delta_E / (self.kB * self.T)) - 1))
+                elif type == 'tt':
+                    RateIntegrals[i, j] = abs(delta_E / (np.exp(delta_E / (self.kB * self.T)) - 1))
 
-                RateIntegrals[0, i, j] = abs((delta_E - self.V_DC) / (np.exp((delta_E - self.V_DC) / (self.kB * self.T)) - 1))
-                RateIntegrals[1, i, j] = abs((delta_E + self.V_DC) / (np.exp((delta_E + self.V_DC) / (self.kB * self.T)) - 1))
+                #if delta_E == 0.0:
+                #    fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - delta_E))
+                #    RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
+                #else:
+                #RateIntegrals[i, j] = abs(delta_E / (np.exp(delta_E / (self.kB * self.T)) - 1))
 
-                # Exception for the sample-sample rate where delta_E = 0
-                if delta_E == 0.0:
-                    fun_ss = lambda x: FermiDirac(x) * (1 - FermiDirac(x - delta_E))
-                    RateIntegrals[2, i, j] = quad(fun_ss, -np.inf, np.inf)[0]
-                else:
-                    RateIntegrals[2, i, j] = abs(delta_E / (np.exp(delta_E / (self.kB * self.T)) - 1))
-
-     return RateIntegrals
+        return RateIntegrals
         
     def calcRates(self, **kwargs):
 
@@ -713,7 +737,7 @@ class SpinSys:
         options.update(kwargs)
 
         # First calculate the Eigenenergies and States
-        self.calcEigEnergies()
+        # self.calcEigEnergies()
 
         # Initialize the Rates matrix
         self.Rates = np.zeros((5,self.dimensionOfMatrix, self.dimensionOfMatrix))
@@ -729,7 +753,10 @@ class SpinSys:
             MatrixSS_summed += self.MatrixSS[i, :, :] * self.G_ss[i]
 
         # Calculating the 3 different integrals
-        RateIntegrals = self.calcRateIntegrals()
+        RateIntegrals_ts = self.calcRateIntegrals(self.V_DC,'ts')
+        RateIntegrals_st = self.calcRateIntegrals(self.V_DC,'st')
+        RateIntegrals_ss = self.calcRateIntegrals(self.V_DC,'ss')
+        #RateIntegrals_tt = self.calcRateIntegrals(self.V_DC,'tt')
 
         Rate_0 = self.Matrix[0][0]  # Transition matrix element of the ground state
 
@@ -750,10 +777,10 @@ class SpinSys:
             RateFactor_tt = 2 * np.pi / self.hbar_meV * self.T02**2 / (self.Jrs**2) * self.G_tt
 
         # Calculate rates based on rate factors and integrals
-        self.Rates[0, :, :] = RateFactor_ts * self.Matrix.T * RateIntegrals[0, :, :]
-        self.Rates[1, :, :] = RateFactor_st * self.Matrix * RateIntegrals[1, :, :]
-        self.Rates[2, :, :] = RateFactor_ss * MatrixSS_summed * RateIntegrals[2, :, :]
-        self.Rates[3, :, :] = RateFactor_tt * self.MatrixTT * RateIntegrals[2, :, :]
+        self.Rates[0, :, :] = RateFactor_ts * self.Matrix.T *  RateIntegrals_ts
+        self.Rates[1, :, :] = RateFactor_st * self.Matrix *  RateIntegrals_st
+        self.Rates[2, :, :] = RateFactor_ss * MatrixSS_summed *  RateIntegrals_ss
+        self.Rates[3, :, :] = RateFactor_tt * self.MatrixTT *  RateIntegrals_ss
 
         # Sum the rates
         self.Rates_Summed = (self.Rates[0,:, :] + self.Rates[1, :, :] + 
@@ -819,15 +846,15 @@ class SpinSys:
         dIdV[n-1] = (I[n-1] - I[n-2]) / (V[n-1] - V[n-2])
         
         return dIdV
-
+    
     def calcIETS(self, **kwargs):
         
         # Default options (like ops struct in MATLAB)
         options = {
          'Vrange': 30,
-         'N': 500,
-         'AllowPumping': True,
-         'norm': False,
+         'N': 200,
+         'AllowPumping': False,
+         'norm': True,
          'plot': True
         }
 
@@ -837,7 +864,7 @@ class SpinSys:
         # Initialize the arrays
         V_array = np.linspace(-options['Vrange'], options['Vrange'], options['N'])
         I = np.zeros((options['N']),dtype=float)
-        P = np.zeros((self.dimensionOfMatrix, options['N']))
+        P = np.zeros((self.dimensionOfMatrix, options['N']),dtype=float)
         
         # Solve the rate equation for each voltage value
         for i in range(options['N']):
@@ -855,34 +882,230 @@ class SpinSys:
         
         # Optional Plot
         if options['plot']:
-            # Plotting the dI/dV spectrum
-            plt.figure(188)
-            plt.plot(V_array, dIdV, '-k', linewidth=2)
-            plt.ylabel('dI/dV (a.u.)')
-            plt.xlabel('Bias Voltage (mV)')
-            plt.xlim([-options['Vrange'], options['Vrange']])
-            plt.title('IETS-Spectrum')
-            plt.grid(True)
-            plt.tick_params(axis='both', which='major', labelsize=16)  # Set tick label size
-            plt.show()
+            if options['AllowPumping']:
+                fig, axs = plt.subplots(1, 2, figsize=(14, 6))
 
-            # Plotting the populations of each state
-            plt.figure(189)
-            colors = plt.cm.hsv(np.arange(self.dimensionOfMatrix))  # Get the colormap
+                # Plotting the dI/dV spectrum
+                axs[0].plot(V_array, dIdV, '-k', linewidth=2)
+                axs[0].set_ylabel('dI/dV (a.u.)')
+                axs[0].set_xlabel('Bias Voltage (mV)')
+                axs[0].set_xlim([-options['Vrange'], options['Vrange']])
+                axs[0].set_title('IETS-Spectrum')
+                axs[0].grid(True)
+                axs[0].tick_params(axis='both', which='major', labelsize=16)
+
+                # Plotting the populations of each state
+                colors = plt.cm.hsv(np.arange(self.dimensionOfMatrix))  # Get the colormap
+                for i in range(len(P[:, 0])):
+                    axs[1].plot(V_array, P[i, :], color=colors[i, :], linewidth=2, label=f'p{i+1}')
             
-            for i in range(len(P[:, 0])):
-                plt.plot(V_array, P[i, :], color=colors[i], linewidth=2, label=f'p{i+1}')
-            
-            plt.yscale('log')
-            plt.xlabel('Bias Voltage (mV)')
-            plt.ylim([1e-3, 1])
-            plt.xlim([-options['Vrange'], options['Vrange']])
-            plt.legend()
-            plt.title('Populations')
-            plt.grid(True)
-            plt.tick_params(axis='both', which='major', labelsize=16)  # Set tick label size
-            plt.show()
+                axs[1].set_yscale('log')
+                axs[1].set_xlabel('Bias Voltage (mV)')
+                axs[1].set_ylim([1e-3, 1])
+                axs[1].set_xlim([-options['Vrange'], options['Vrange']])
+                #axs[1].legend()
+                axs[1].set_title('Populations')
+                axs[1].grid(True)
+                axs[1].tick_params(axis='both', which='major', labelsize=16)
+
+                plt.tight_layout()
+                plt.show()
+
+            else:
+                # Plotting the dI/dV spectrum
+                plt.figure(188)
+                plt.plot(V_array, dIdV, '-k', linewidth=2)
+                plt.ylabel('dI/dV (a.u.)')
+                plt.xlabel('Bias Voltage (mV)')
+                plt.xlim([-options['Vrange'], options['Vrange']])
+                plt.title('IETS-Spectrum')
+                plt.grid(True)
+                plt.tick_params(axis='both', which='major', labelsize=16)
+                plt.show()
 
         return V_array, dIdV, P
-
     
+    def plotEnergyVsSz(self):
+        # Calculate the Sz matrix elements for each state
+        Sz_elements = np.zeros(self.dimensionOfMatrix)
+
+        Sz_Operator = np.sum(self.Sz, axis=0)
+        for i in range(self.dimensionOfMatrix):
+            Sz_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sz_Operator @ self.eigVectors[:, i])
+
+        # Plot the energy vs Sz matrix elements
+        plt.figure()
+        plt.scatter(Sz_elements, self.E_All_inGHz, c='b', marker='o')
+        #plt.xlabel(r'$\langle \psi | S_z | \psi \rangle$')
+        plt.xlabel('m_z')
+        plt.ylabel('Energy (GHz)')
+        plt.title('Energy vs Sz Matrix Elements')
+        plt.grid(True)
+        plt.show()
+
+    def calcIETS_2(self, **kwargs):
+        # This function calculates the IETS spectrum using the rate equation approach, optimized to calculate just the parts that change with 
+
+        # Default options (like ops struct in MATLAB)
+        options = {
+         'Vrange': 30,
+         'N': 200,
+         'AllowPumping': False,
+         'norm': True,
+         'plot': True,
+         'Approach': "Loth"
+        }
+
+         #  Update with user-provided options
+        options.update(kwargs)
+        
+        # Initialize the arrays
+        V_array = np.linspace(-options['Vrange'], options['Vrange'], options['N'])
+        I = np.zeros((options['N']),dtype=float)
+        P = np.zeros((self.dimensionOfMatrix, options['N']),dtype=float)
+        
+        #Prepare for everything that is not affected by the voltage
+        Rates = np.zeros((5,self.dimensionOfMatrix, self.dimensionOfMatrix))
+
+        # Getting the relevant matrix elements
+        self.Matrix = self.calcTunnelingMatrixElements("st")[0]
+        self.MatrixSS = self.calcTunnelingMatrixElements("ss")
+        self.MatrixTT = self.calcTunnelingMatrixElements("tt")[0]
+
+        MatrixSS_summed = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix))
+
+        for i in range(self.NSpins):
+            MatrixSS_summed += self.MatrixSS[i, :, :] * self.G_ss[i]
+
+        Rate_0 = self.Matrix[0][0]  # Transition matrix element of the ground state
+
+        #Rate-Factors using Loth 2010
+        if options['Approach'] == "Loth":
+            self.G_st = (1 - self.b0) * self.G
+
+            RateFactor_ts = self.G_st / (self.e * Rate_0) / 1e3
+            RateFactor_st = self.G_st / (self.e * Rate_0) / 1e3
+            RateFactor_ss = 1 / (self.e * Rate_0) / 1e3
+            RateFactor_tt = 0
+
+        #Rate-Factors using Ternes 2010 (not default)
+        if options['Approach'] == "Ternes":
+            RateFactor_ts = 2 * np.pi / self.hbar_meV * self.T02
+            RateFactor_st = 2 * np.pi / self.hbar_meV * self.T02
+            RateFactor_ss = 2 * np.pi / self.hbar_meV * self.Jrs**2
+            RateFactor_tt = 2 * np.pi / self.hbar_meV * self.T02**2 / (self.Jrs**2) * self.G_tt
+        
+
+        # Calculate the rates that stem from Tip tip and sample sample scattering, since they are not affected by the voltage
+        RateIntegrals_ss = self.calcRateIntegrals(self.V_DC,'ss')
+        
+        Rates[2, :, :] = RateFactor_ss * MatrixSS_summed * RateIntegrals_ss
+        Rates[3, :, :] = RateFactor_tt * self.MatrixTT * RateIntegrals_ss
+
+        # This part happens know as often as we need it
+        for I_index in range(options['N']):
+            V_DC = V_array[I_index]
+
+            RateIntegrals_ts = self.calcRateIntegrals(V_DC,'ts')
+            RateIntegrals_st = self.calcRateIntegrals(V_DC,'st')
+            
+            # Calculate rates based on rate factors and integrals
+            Rates[0, :, :] = RateFactor_ts * self.Matrix.T * RateIntegrals_ts
+            Rates[1, :, :] = RateFactor_st * self.Matrix * RateIntegrals_st
+
+            # Sum the rates
+            Rates_Summed = (Rates[0,:, :] + Rates[1, :, :] + 
+                                Rates[2, :, :] + Rates[3, :, :] + 
+                                Rates[4, :, :])
+
+            # Build the Rate-Equation matrix
+            K = np.zeros((self.dimensionOfMatrix, self.dimensionOfMatrix))
+            
+            for i in range(self.dimensionOfMatrix):
+                for j in range(self.dimensionOfMatrix):
+                    if i != j:
+                        K[i, i] -= Rates_Summed[i, j]  # Rates leaving state i
+                        K[i, j] = Rates_Summed[j, i]  # Rates leading to state i
+                    
+            # Calculate the thermal population (Boltzmann distribution)
+            p0 = np.exp(-self.E_All / (self.kB * self.T))
+            pTot = np.sum(p0)
+            self.p0 = p0 / pTot  # Normalized thermal population
+
+            # Solve the Rate-Equation if non-thermal population is desired
+            if options['AllowPumping']:
+                p = null_space(K)
+                if p.size == 0:  # If no valid solution, use thermal distribution
+                    Populations = self.p0
+                else:
+                    Populations = p[:, 0] / np.sum(p[:, 0])
+            else:
+                Populations = self.p0
+
+            # Deriving the tunneling current using Equation 41 from Ternes paper
+            I_value = 0
+            for i in range(self.dimensionOfMatrix):
+                for j in range(self.dimensionOfMatrix):
+                    I_temp = self.e * Populations[i] * (Rates[0, i, j] - Rates[1, i, j])
+                    I_value += I_temp
+
+            # Adjust current calculation based on approach
+            if options['Approach'] == "Ternes":
+                I_value = I_value / (self.e**2 * self.T02 / self.h_meV)
+            if options['Approach'] == "Loth":
+                I_value += self.b0 * self.G * self.V_DC
+
+            I[I_index] = I_value
+            P[:, I_index] = Populations    
+
+        # Calculate the derivative (dI/dV)
+        dIdV = self.calculate_derivative(I, (V_array*1e-3))  # Convert V_array to volts
+        
+        # Normalize dI/dV if required
+        if options['norm']:
+            dIdV = (dIdV - np.min(dIdV)) / (np.max(dIdV) - np.min(dIdV))
+        
+        # Optional Plot
+        if options['plot']:
+            if options['AllowPumping']:
+                fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+
+                # Plotting the dI/dV spectrum
+                axs[0].plot(V_array, dIdV, '-k', linewidth=2)
+                axs[0].set_ylabel('dI/dV (a.u.)')
+                axs[0].set_xlabel('Bias Voltage (mV)')
+                axs[0].set_xlim([-options['Vrange'], options['Vrange']])
+                axs[0].set_title('IETS-Spectrum')
+                axs[0].grid(True)
+                axs[0].tick_params(axis='both', which='major', labelsize=16)
+
+                # Plotting the populations of each state
+                colors = plt.cm.hsv(np.arange(self.dimensionOfMatrix))  # Get the colormap
+                for i in range(len(P[:, 0])):
+                    axs[1].plot(V_array, P[i, :], color=colors[i, :], linewidth=2, label=f'p{i+1}')
+            
+                axs[1].set_yscale('log')
+                axs[1].set_xlabel('Bias Voltage (mV)')
+                axs[1].set_ylim([1e-3, 1])
+                axs[1].set_xlim([-options['Vrange'], options['Vrange']])
+                #axs[1].legend()
+                axs[1].set_title('Populations')
+                axs[1].grid(True)
+                axs[1].tick_params(axis='both', which='major', labelsize=16)
+
+                plt.tight_layout()
+                plt.show()
+
+            else:
+                # Plotting the dI/dV spectrum
+                plt.figure(188)
+                plt.plot(V_array, dIdV, '-k', linewidth=2)
+                plt.ylabel('dI/dV (a.u.)')
+                plt.xlabel('Bias Voltage (mV)')
+                plt.xlim([-options['Vrange'], options['Vrange']])
+                plt.title('IETS-Spectrum')
+                plt.grid(True)
+                plt.tick_params(axis='both', which='major', labelsize=16)
+                plt.show()
+
+        return V_array, dIdV, P
