@@ -61,7 +61,7 @@ class SpinSys:
         self.b0 = 0 # Ratio how many electrons that tunnel do not care about the spin!!
         self.G = 1e-9; # [A/V], Experimental conductance at 0V;
         self.G_ss = [1e-8]*self.NSpins # Sample-Sample conductance
-        self.G_tt = 1 # 1 enables tip-tip scattering contribution, 0 disables it!
+        self.G_tt = 0 # 1 enables tip-tip scattering contribution, 0 disables it!
 
         self.T02 = 2e-5 
         self.Jrs = 0.1 
@@ -191,7 +191,7 @@ class SpinSys:
        #     if np.real(self.eigVectors[0, i]) < 0:
        #         self.eigVectors[:, i] = -self.eigVectors[:, i]
 
-        self.calcEigStates()
+        #self.calcEigStates()
 
     def H_addZeeman(self):
         # Adding the Zeeman Term 
@@ -829,8 +829,6 @@ class SpinSys:
             self.I = self.I / (self.e**2 * self.T02 / self.h_meV)
         if options['Approach'] == "Loth":
             self.I += self.b0 * self.G * self.V_DC
-
-    
 
     def calculate_derivative(self, I, V):
         
