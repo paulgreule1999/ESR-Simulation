@@ -766,8 +766,9 @@ class SpinSys:
 
             RateFactor_ts = self.G_st / (self.e * Rate_0) / 1e3
             RateFactor_st = self.G_st / (self.e * Rate_0) / 1e3
+            # The G_ss value might be different for every spin thats why we previously incorpareted it when we summed the Matrix
             RateFactor_ss = 1 / (self.e * Rate_0) / 1e3
-            RateFactor_tt = 0
+            RateFactor_tt = self.G_st**2/self.G_ss[self.ReadoutSpin]/(self.e*Rate_0)/1e3*self.G_tt; #Gtt is actually calculated from Gss and Gst, we use the Gtt value 0,1 here just o allow it or not
 
         ### Rate-Factors using Ternes 2010 (not default)
         if options['Approach'] == "Ternes":
@@ -895,15 +896,16 @@ class SpinSys:
                 axs[0].tick_params(axis='both', which='major', labelsize=16)
 
                 # Plotting the populations of each state
-                colors = plt.cm.hsv(np.arange(self.dimensionOfMatrix))  # Get the colormap
+                colors = plt.cm.jet(np.linspace(0, 1, self.dimensionOfMatrix))[:, :3]  # Get the colormap without the alpha channel
                 for i in range(len(P[:, 0])):
-                    axs[1].plot(V_array, P[i, :], color=colors[i, :], linewidth=2, label=f'p{i+1}')
+                    axs[1].plot(V_array, P[i, :], color=colors[i, :], linewidth=2, label=f'p{i}')
             
-                axs[1].set_yscale('log')
+                axs[1].set_ylabel('%')
+                #axs[1].set_yscale('log')
                 axs[1].set_xlabel('Bias Voltage (mV)')
-                axs[1].set_ylim([1e-3, 1])
+                axs[1].set_ylim([0, 1])
                 axs[1].set_xlim([-options['Vrange'], options['Vrange']])
-                #axs[1].legend()
+                axs[1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
                 axs[1].set_title('Populations')
                 axs[1].grid(True)
                 axs[1].tick_params(axis='both', which='major', labelsize=16)
@@ -1086,7 +1088,7 @@ class SpinSys:
             
                 axs[1].set_yscale('log')
                 axs[1].set_xlabel('Bias Voltage (mV)')
-                axs[1].set_ylim([1e-3, 1])
+                axs[1].set_ylim([0, 1e-3])
                 axs[1].set_xlim([-options['Vrange'], options['Vrange']])
                 #axs[1].legend()
                 axs[1].set_title('Populations')
