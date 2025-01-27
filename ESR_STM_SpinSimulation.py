@@ -944,6 +944,42 @@ class SpinSys:
         plt.title('Energy vs Sz Matrix Elements')
         plt.grid(True)
         plt.show()
+    
+    def plotEnergyVsSx(self):
+        # Calculate the Sz matrix elements for each state
+        Sx_elements = np.zeros(self.dimensionOfMatrix)
+
+        Sx_Operator = np.sum(self.Sx, axis=0)
+        for i in range(self.dimensionOfMatrix):
+            Sx_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sx_Operator @ self.eigVectors[:, i])
+
+        # Plot the energy vs Sz matrix elements
+        plt.figure()
+        plt.scatter(Sx_elements, self.E_All_inGHz, c='b', marker='o')
+        #plt.xlabel(r'$\langle \psi | S_z | \psi \rangle$')
+        plt.xlabel('m_x')
+        plt.ylabel('Energy (GHz)')
+        plt.title('Energy vs Sx Matrix Elements')
+        plt.grid(True)
+        plt.show()
+
+    def plotEnergyVsSy(self):
+        # Calculate the Sz matrix elements for each state
+        Sy_elements = np.zeros(self.dimensionOfMatrix)
+
+        Sy_Operator = np.sum(self.Sy, axis=0)
+        for i in range(self.dimensionOfMatrix):
+            Sy_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sy_Operator @ self.eigVectors[:, i])
+
+        # Plot the energy vs Sz matrix elements
+        plt.figure()
+        plt.scatter(Sy_elements, self.E_All_inGHz, c='b', marker='o')
+        #plt.xlabel(r'$\langle \psi | S_z | \psi \rangle$')
+        plt.xlabel('m_y')
+        plt.ylabel('Energy (GHz)')
+        plt.title('Energy vs Sy Matrix Elements')
+        plt.grid(True)
+        plt.show()
 
     def calcIETS_2(self, **kwargs):
         # This function calculates the IETS spectrum using the rate equation approach, optimized to calculate just the parts that change with 
@@ -1111,3 +1147,22 @@ class SpinSys:
                 plt.show()
 
         return V_array, dIdV, P
+    
+    def calcMagnetization(self):
+        Sz_elements = np.zeros(self.dimensionOfMatrix)
+        self.Mag = 0 
+        Sz_Operator = np.sum(self.Sz, axis=0)
+        for i in range(self.dimensionOfMatrix):
+            Sz_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sz_Operator @ self.eigVectors[:, i])
+            self.Mag += Sz_elements[i]*self.Populations[i]
+        self.Mag = self.Mag / 0.5
+
+    def calcMagnetization_part(self):
+        self.Mag_part = np.zeros(self.NSpins)
+        for i in range(self.NSpins):
+            Sz_elements = np.zeros(self.dimensionOfMatrix)
+            Sz_Operator = self.Sz[i]
+            for j in range(self.dimensionOfMatrix):
+                Sz_elements[j] = np.real(self.eigVectors[:, j].T.conj() @ Sz_Operator @ self.eigVectors[:, j])
+                self.Mag_part[i] += Sz_elements[j]*self.Populations[j]
+            self.Mag_part[i] = self.Mag_part[i] / 0.5    
