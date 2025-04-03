@@ -543,7 +543,8 @@ class SpinSys:
          'N_Freq': 500,
          'lw': 0.1,
          'plot': 1,
-         'norm': 1
+         'norm': 1,
+         'Angle': 0
         }
 
          #  Update with user-provided options
@@ -557,7 +558,9 @@ class SpinSys:
         
         # calculating the ESR signal for each Field 
         for i in range(options['N_B']):
-            self.BTip[2]=BTipRange[i]
+            self.BTip[2]=BTipRange[i]*np.cos(options['Angle']*np.pi/180) # BTip[2] is the z-component of the tip field
+            self.BTip[0]=BTipRange[i]*np.sin(options['Angle']*np.pi/180) # BTip[0] is the x-component of the tip field
+            self.BTip[1]=0  # BTip[0] is the y-component of the tip field
             self.calcEigEnergies()
             Freq, ESRsignal[i][:],_ = self.calcESR_Benjamin(plot=0,norm=options['norm'],N=options['N_Freq'],lw=options['lw'],FreqRange=options['FreqRange'],AllowPumping=options['AllowPumping'])
             
@@ -575,7 +578,7 @@ class SpinSys:
         # Add labels and title for primary Y-axis
         ax1.set_xlabel('Freq (GHz)')
         ax1.set_ylabel('B_Tip (mT)')
-        ax1.set_title('Tipfield dependent ESR')
+        ax1.set_title('Tipfield dependent ESR' + f' (Angle = {options["Angle"]}°)')
 
         # Create a secondary Y-axis
         ax2 = ax1.twinx()
@@ -588,6 +591,7 @@ class SpinSys:
 
         cbar = plt.colorbar(im, ax=ax1)
         cbar.ax.set_position([0.9, 0.1, 0.03, 0.8])
+        
         
         plt.show()
         
