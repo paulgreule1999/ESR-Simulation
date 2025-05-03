@@ -1152,21 +1152,72 @@ class SpinSys:
 
         return V_array, dIdV, P
     
-    def calcMagnetization(self):
-        Sz_elements = np.zeros(self.dimensionOfMatrix)
-        self.Mag = 0 
-        Sz_Operator = np.sum(self.Sz, axis=0)
-        for i in range(self.dimensionOfMatrix):
-            Sz_elements[i] = np.real(self.eigVectors[:, i].T.conj() @ Sz_Operator @ self.eigVectors[:, i])
-            self.Mag += Sz_elements[i]*self.Populations[i]
-        self.Mag = self.Mag / 0.5
 
-    def calcMagnetization_part(self):
-        self.Mag_part = np.zeros(self.NSpins)
-        for i in range(self.NSpins):
-            Sz_elements = np.zeros(self.dimensionOfMatrix)
-            Sz_Operator = self.Sz[i]
-            for j in range(self.dimensionOfMatrix):
-                Sz_elements[j] = np.real(self.eigVectors[:, j].T.conj() @ Sz_Operator @ self.eigVectors[:, j])
-                self.Mag_part[i] += Sz_elements[j]*self.Populations[j]
-            self.Mag_part[i] = self.Mag_part[i] / 0.5    
+    def calcIETS_0(self, **kwargs):
+        # This function calculates the IETS spectrum for a thermally occupied system
+
+        # Default options (like ops struct in MATLAB)
+        options = {
+         'Vrange': 30,
+         'N': 200,
+         'norm': True,
+         'plot': True,
+         #'Approach': "Loth"
+        }
+
+         #  Update with user-provided options
+        options.update(kwargs)
+
+        # Initialize the arrays
+        V_array = np.linspace(-options['Vrange'], options['Vrange'], options['N'])
+        dIdV = np.zeros((options['N']),dtype=float)
+
+        # Calculate the thermal population (Boltzmann distribution)
+        p0 = np.exp(-self.E_All / (self.kB * self.T))
+        pTot = np.sum(p0)
+        self.p0 = p0 / pTot  # Normalized thermal population
+
+        # Calculate the Rate Matrix 
+        RateMatrix = self.calcTunnelingMatrixElements("st")[0]
+
+        for i in range(self.dimensionOfMatrix):
+            if self.p0[i]>10^(-6):
+                for j in range(self.dimensionOfMatrix):
+                    ep = self.tunnelingBroadenedStepFunction(np.array((self.E_All[j]-self.E_All[i]-V_array)/(self.T*self.kB)))
+                    en = self.tunnelingBroadenedStepFunction(np.array((self.E_All[j]-self.E_All[i]+V_array)/(self.T*self.kB)))
+                    ytemp = self.p0[i]*(RateMatrix[j,i]*ep + RateMatrix[i,j]*en)
+                    dIdV = dIdV + ytemp
+        
+        # Normalize dI/dV if required
+        if options['norm']:
+            dIdV = (dIdV - np.min(dIdV)) / (np.max(dIdV) - np.min(dIdV))
+
+        if options['plot']:
+            # Plotting the dI/dV spectrum
+            plt.figure(188)
+            plt.plot(V_array, dIdV, '-k', linewidth=2)
+            plt.ylabel('dI/dV (a.u.)')
+            plt.xlabel('Bias Voltage (mV)')
+            plt.xlim([-options['Vrange'], options['Vrange']])
+            plt.title('IETS-Spectrum')
+            plt.grid(True)
+            plt.tick_params(axis='both', which='major', labelsize=16)
+            plt.show()
+        
+        return V_array, dIdV
+
+        
+    def tunnelingBroadenedStepFunction(self,x_V):
+        # Set small values of x to zero
+        z = np.exp(x_V)
+        y = (1 + (x_V - 1) * z) / ((z - 1) ** 2)
+        
+        # Set y for small x values to 0.5
+        #y = np.where(np.abs(x_V) < 1e-5, 0.5, y)
+        
+        # We get some NaN results because of large x, we set them to 0
+        y = np.nan_to_num(y, nan=0.0)
+        
+        return y
+
+    

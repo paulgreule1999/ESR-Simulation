@@ -11,6 +11,9 @@
 - [x] Include the spin pumping in the ESR experiment
 - [x] Add showing Matrix representation 
 
+To tidy up the code, we can leave some functions for IETS but we could include them in one master function, that then decides whether to include spin pumping or not, one could also think of directly plotting the spectra for all spins
+Another Idea would be to split the matrix element into parts, to later see which signal comes from elastic or inelastic parts
+
 ## Ideas
 - [x] Improve performance
 - [ ] Make Subclasses
